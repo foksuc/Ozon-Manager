@@ -1,0 +1,9 @@
+# Runtime + local QA dependencies
+requests>=2.31,<3
+streamlit>=1.40,<2
+
+# Optional OzonAPI integration
+ozonapi-async==0.89.0
+
+# Local QA / development
+pytest>=8,<9
