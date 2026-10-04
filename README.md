@@ -1,168 +1,1082 @@
-> **Плановое обновление программы 14.10.2026**
+# 🚀 Ozon Manager
+
+<p align="center">
+  <img src="assets/ozon_manager.png" alt="Ozon Manager" width="220">
+</p>
+
+<p align="center">
+  <strong>Локальный менеджер для безопасной работы с Ozon Seller API</strong><br>
+  📦 Товары · 🎯 Акции · 💰 Цены · 📊 Остатки · 🧾 История · 🔄 Rollback
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.11%2B-blue?logo=python" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/Streamlit-UI-red?logo=streamlit" alt="Streamlit">
+  <img src="https://img.shields.io/badge/Ozon-Seller%20API-orange" alt="Ozon Seller API">
+  <img src="https://img.shields.io/badge/status-local%20single--user-informational" alt="Local single-user">
+</p>
+
+---
+
+> ## ⚠️ Плановое обновление программы 14.10.2026
 >
-> Текущий релиз сохраняет проверенный рабочий контур Promotions. Используемые legacy promotion mutation endpoints Ozon имеют плановое отключение 13.10.2026; новый transport не внедрён до появления возможности подтвердить его фактическое поведение.
+> Текущий релиз сохраняет проверенный рабочий контур управления товарами
+> и акциями через Ozon Seller API. Используемые для mutation операций
+> promotion endpoints Ozon имеют плановое отключение 13.10.2026, поэтому
+> замена transport должна быть подтверждена отдельной API-проверкой и
+> запланирована на **14.10.2026**. До этого момента приложение не
+> притворяется, что новый контракт уже реализован.
 
-# Ozon Manager — текущий локальный релиз
+Добро пожаловать в **Ozon Manager** --- локальное приложение для
+управления товарами и операциями Ozon через Seller API. Приложение
+рассчитано на безопасную работу с реальным магазином: перед изменяющими
+операциями используются Preview, Fresh Check, Snapshot, явное
+подтверждение и проверка результата после записи.
 
-Local Streamlit application for safe management of **Elastic Boosting `action_price`** through the audited Ozon Promotions API contract as verified for this release. The current build covers Candidates, Participants, Auto-Add, history and snapshot-backed rollback workflows.
+------------------------------------------------------------------------
 
-## Scope
+# 1. Что такое Ozon Manager
 
-The current build manages:
+Ozon Manager --- это локальное однопользовательское приложение на
+Python + Streamlit.
 
-- Elastic Boosting candidates → participant ADD;
-- existing participant `action_price` UPDATE;
-- participant REMOVE;
-- read-only Auto-Add inspection and threshold-based deletion;
-- Auto-Add rollback;
-- operation history, reconciliation and snapshot-based rollback.
+Оно предназначено для того, чтобы:
 
-The only participant price mutation target is `action_price`. Base product price is never mutated.
+-   получать данные о промо-акциях Ozon;
+-   работать с кандидатами и участниками акций;
+-   управлять `action_price` в Elastic Boosting в рамках текущего
+    проверенного контракта;
+-   выполнять ADD / UPDATE / REMOVE с защитными проверками;
+-   работать с Auto-Add в пределах реализованного контракта;
+-   контролировать остатки;
+-   показывать названия товаров, SKU и идентификаторы;
+-   вести историю операций;
+-   создавать snapshot перед предусмотренными изменениями;
+-   выполнять rollback по snapshot;
+-   обнаруживать расхождения между ожидаемым и фактическим состоянием;
+-   работать с массовыми пакетами товаров;
+-   блокировать небезопасные операции при ошибках проверки.
 
-**Blocked:** Target Boost input/formula, base-price mutation, Seller Actions, undocumented activate/deactivate update workarounds, blind mutation retries.
+Приложение работает локально. Реальные API-credentials не входят в
+репозиторий.
 
-## Safety workflow
+------------------------------------------------------------------------
+
+## 🧭 Быстрая карта проекта
 
 ```text
-Load Promotion
-→ Load Participants
-→ Select Products
-→ Read Current State
-→ Preview
-→ Fresh Check
-→ Snapshot
-→ Explicit Confirmation
-→ Mutation
-→ Read After Write
-→ Per-SKU Verification
-→ Result
-→ History
+👤 Аккаунт
+   │
+   ├── 🎯 Акции ──► Кандидаты ──► Участники
+   │                    │              │
+   │                    └── Preview ───┤
+   │                                   ▼
+   │                              🔎 Fresh Check
+   │                                   │
+   │                              💾 Snapshot
+   │                                   │
+   │                              ⚡ Mutation
+   │                                   │
+   │                              🔍 Read After Write
+   │                                   │
+   │                              📜 History / Rollback
+   │
+   └── 📦 Остатки
 ```
 
-No mutation is allowed without Preview, Fresh Check, Snapshot and explicit Confirmation. Rollback is itself a mutation and follows the same safety gates.
+# 2. Что проект умеет СЕЙЧАС
 
-For Participant UPDATE, the UI calculates an individual Elastic Boosting discount interval from the current Ozon `price_min_elastic` / `price_max_elastic` values. There is no fixed `1%–18%` UPDATE rule. The **Единый процент для всех выбранных товаров** control can apply one manually entered percentage to the whole package only when every selected product passes its own minimum and maximum range; if any product fails, the package is not changed.
+## 2.1. Акции и Elastic Boosting
 
-All long-running reads, Fresh Checks, snapshot creation, mutations and read-after-write verification use a centered modal loading overlay with step-by-step status.
+Текущий рабочий контур включает:
 
-## API contract used by the code
+-   загрузку списка доступных акций;
+-   загрузку кандидатов;
+-   загрузку участников акции;
+-   добавление товара из кандидатов в акцию;
+-   изменение `action_price` существующего участника;
+-   удаление участника;
+-   чтение результата после mutation;
+-   проверку результата отдельно по SKU / товару;
+-   обработку частичного успеха и частичного отказа.
 
-From API_SPEC_v1.6:
+Для изменения цены приложение работает именно с `action_price`.
 
-- `GET /v1/actions` — promotion listing;
-- `POST /v2/actions/candidates` — candidate read (cursor `last_id`);
-- `POST /v2/actions/products` — participant read (cursor `last_id`);
-- `POST /v1/actions/products/activate` — live-verified action-price mutation for an existing Elastic Boosting participant;
-- `POST /v2/actions/products` — participant read and read-after-write verification.
+**Базовая цена товара Ozon не изменяется.**
 
-The adapter uses the reconciled current contract: `GET /v1/actions`, `POST /v2/actions/candidates`, `POST /v2/actions/products`, `POST /v1/actions/products/activate`, and `POST /v1/actions/products/deactivate`.
+------------------------------------------------------------------------
 
-## Run
+## 2.2. Расчёт скидки
 
-```bash
+Для UPDATE Elastic Boosting приложение использует индивидуальный
+диапазон:
+
+-   минимальный допустимый процент;
+-   максимальный допустимый процент.
+
+Диапазон берётся из актуальных данных товара:
+
+``` text
+price_min_elastic
+price_max_elastic
+```
+
+Фиксированное правило вроде «для всех товаров разрешено 1--18%» в
+приложение не зашито.
+
+Есть режим:
+
+**«Единый процент для всех выбранных товаров»**
+
+Он разрешается только тогда, когда введённый процент проходит проверку
+для каждого выбранного товара.
+
+Если хотя бы один товар не проходит собственный диапазон --- пакет не
+применяется.
+
+------------------------------------------------------------------------
+
+## 2.3. Безопасность mutation
+
+Изменяющая операция проходит последовательность:
+
+``` text
+Загрузка акции
+      ↓
+Загрузка участников
+      ↓
+Выбор товаров
+      ↓
+Чтение текущего состояния
+      ↓
+Preview
+      ↓
+Fresh Check
+      ↓
+Snapshot
+      ↓
+Явное подтверждение
+      ↓
+Mutation
+      ↓
+Read After Write
+      ↓
+Проверка каждого SKU
+      ↓
+Результат
+      ↓
+History
+```
+
+Приложение не должно автоматически повторять mutation после
+неопределённого результата.
+
+Например, timeout или network error может означать:
+
+``` text
+UNKNOWN_RESULT
+```
+
+В таком случае повторная mutation вслепую запрещена.
+
+------------------------------------------------------------------------
+
+## 2.4. Snapshot и rollback
+
+Для операций, для которых предусмотрено восстановление, исходное
+состояние сохраняется до mutation.
+
+Rollback рассматривается как отдельная изменяющая операция и также
+проходит защитные проверки.
+
+История содержит информацию о выполненных операциях, результатах и
+ошибках.
+
+------------------------------------------------------------------------
+
+## 2.5. Auto-Add
+
+Текущая версия поддерживает:
+
+-   чтение состояния Auto-Add;
+-   просмотр соответствующих товаров;
+-   операции удаления в пределах реализованного контракта;
+-   rollback Auto-Add в предусмотренном проектом сценарии.
+
+Auto-Add не следует путать с обычными участниками промо-акции.
+
+------------------------------------------------------------------------
+
+## 2.6. Остатки
+
+В приложении есть отдельный раздел для работы с остатками.
+
+Точный набор операций определяется реализованным Ozon API-контрактом
+текущего релиза. Неподтверждённые mutation-операции приложение не выдаёт
+за реализованные.
+
+------------------------------------------------------------------------
+
+## 2.7. Таблицы
+
+Основные таблицы приложения используют общий интерактивный компонент.
+
+Поддерживаются:
+
+-   горизонтальная прокрутка;
+-   фиксированная высота таблицы;
+-   sticky-заголовки;
+-   сортировка;
+-   фильтрация через контекстное действие по заголовку;
+-   выделение диапазона через Shift;
+-   выбор всех строк через `✓`;
+-   отдельные таблицы кандидатов и участников;
+-   отображение названия товара;
+-   SKU и идентификаторы там, где они доступны.
+
+Долгие операции показывают модальное окно с текущим этапом выполнения.
+
+------------------------------------------------------------------------
+
+# 3. Что проект МОЖЕТ делать в дальнейшем
+
+Ниже перечислены **направления развития**, а не обещание уже
+существующей функциональности.
+
+## 3.1. Обновление promotion mutation API
+
+Главный ближайший пункт:
+
+**плановое обновление программы 14.10.2026.**
+
+Перед реализацией необходимо:
+
+1.  проверить актуальный Ozon OpenAPI;
+2.  определить новый mutation endpoint;
+3.  проверить request / response schema;
+4.  проверить права доступа;
+5.  проверить поведение при partial failure;
+6.  проверить read-after-write;
+7.  выполнить отдельный live forensic-тест;
+8.  заменить adapter только после подтверждения контракта;
+9.  обновить contract tests;
+10. повторить QA полного mutation workflow.
+
+Новый endpoint не должен появляться в коде только на основании
+предположения или старой документации.
+
+------------------------------------------------------------------------
+
+## 3.2. Расширение управления товарами
+
+В дальнейшем архитектура может быть расширена для дополнительных
+операций с товарами, ценами и параметрами, если для них будет
+подтверждён актуальный Ozon Seller API contract.
+
+Каждая новая mutation должна проходить тот же safety-подход:
+
+``` text
+Read → Preview → Fresh Check → Snapshot → Confirmation → Mutation → Verification → History
+```
+
+------------------------------------------------------------------------
+
+## 3.3. Расширение массовых операций
+
+Возможные направления:
+
+-   более крупные пакеты;
+-   более удобное управление пакетами;
+-   расширенная обработка partial failures;
+-   более подробный отчёт по каждой строке;
+-   контролируемая concurrency;
+-   rate limiting на уровне приложения.
+
+Конкретные ограничения должны определяться актуальным API-контрактом
+Ozon, а не предположениями.
+
+------------------------------------------------------------------------
+
+## 3.4. Расширение истории и аудита
+
+В дальнейшем можно расширять:
+
+-   журнал операций;
+-   фильтрацию истории;
+-   детализацию ошибок;
+-   экспорт результатов;
+-   reconciliation reports;
+-   аудит изменений;
+-   диагностику неизвестных результатов.
+
+------------------------------------------------------------------------
+
+## 3.5. Расширение UI
+
+Возможны:
+
+-   дополнительные рабочие разделы;
+-   более подробные карточки товаров;
+-   расширенные фильтры;
+-   дополнительные массовые действия;
+-   улучшение визуализации результатов;
+-   дополнительные состояния loading / success / warning / error.
+
+Новые элементы интерфейса должны соответствовать
+`docs/OZON_SELLER_DESIGN_SYSTEM.md`.
+
+------------------------------------------------------------------------
+
+# 4. Что НЕ реализовано
+
+Следующие возможности нельзя считать реализованными только потому, что
+они могут быть технически желательны:
+
+-   Target Boost input / formula;
+-   изменение базовой цены товара;
+-   Seller Actions;
+-   неподтверждённые activate/deactivate workaround;
+-   автоматические blind retries mutation;
+-   неподтверждённые Ozon API endpoints;
+-   функции, для которых отсутствует подтверждённый актуальный API
+    contract.
+
+------------------------------------------------------------------------
+
+# 5. Требования
+
+Для Windows рекомендуется:
+
+-   Windows 10/11;
+-   Python 3.11+;
+-   Git --- если проект нужно получать или обновлять из GitHub;
+-   доступ в интернет для обращения к Ozon Seller API;
+-   действующие Ozon Seller API credentials.
+
+Проект локальный и рассчитан на одного пользователя.
+
+------------------------------------------------------------------------
+
+# 6. Установка для новичка --- Windows
+
+Ниже инструкция рассчитана на человека, который раньше практически не
+работал с Python.
+
+## Шаг 1. Установить Python
+
+1.  Откройте официальный сайт Python.
+2.  Скачайте актуальный Python 3.11+.
+3.  Запустите установщик.
+4.  В первом окне обязательно включите:
+
+``` text
+Add Python to PATH
+```
+
+5.  Нажмите Install.
+6.  После установки откройте PowerShell.
+
+Проверьте:
+
+``` powershell
+python --version
+```
+
+Должно появиться что-то вроде:
+
+``` text
+Python 3.11.x
+```
+
+или более новая версия.
+
+------------------------------------------------------------------------
+
+## Шаг 2. Получить проект
+
+Если проект уже находится на компьютере --- переходите к следующему
+шагу.
+
+Если используете Git:
+
+``` powershell
+cd E:\Project
+git clone https://github.com/foksuc/Ozon-Manager.git
+cd Ozon-Manager
+```
+
+Если папка проекта находится в другом месте --- используйте фактический
+путь.
+
+------------------------------------------------------------------------
+
+## Шаг 3. Создать виртуальное окружение
+
+В папке проекта выполните:
+
+``` powershell
 python -m venv .venv
-source .venv/bin/activate
+```
+
+После этого активируйте окружение:
+
+``` powershell
+.venv\Scripts\Activate.ps1
+```
+
+Если PowerShell сообщает об ограничении выполнения скриптов, можно
+выполнить:
+
+``` powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+После этого снова:
+
+``` powershell
+.venv\Scripts\Activate.ps1
+```
+
+Если всё получилось, в начале строки PowerShell появится:
+
+``` text
+(.venv)
+```
+
+------------------------------------------------------------------------
+
+## Шаг 4. Установить зависимости
+
+Выполните:
+
+``` powershell
+python -m pip install --upgrade pip
+```
+
+Затем:
+
+``` powershell
 pip install -r requirements.txt
-cp .env.example .env
+```
+
+Дождитесь завершения установки.
+
+Если установка завершилась ошибкой --- не переходите к запуску
+приложения. Сначала исправьте ошибку установки.
+
+------------------------------------------------------------------------
+
+# 7. Настройка Ozon API
+
+## Шаг 1. Создать `.env`
+
+В корне проекта находится:
+
+``` text
+.env.example
+```
+
+Сделайте его копию:
+
+``` text
+.env
+```
+
+В PowerShell:
+
+``` powershell
+Copy-Item .env.example .env
+```
+
+------------------------------------------------------------------------
+
+## Шаг 2. Открыть `.env`
+
+Можно использовать Блокнот:
+
+``` powershell
+notepad .env
+```
+
+Укажите:
+
+``` text
+OZON_CLIENT_ID=ваш_client_id
+OZON_API_KEY=ваш_api_key
+```
+
+Остальные параметры можно оставить такими, как указано в `.env.example`,
+если нет специальной необходимости их менять.
+
+------------------------------------------------------------------------
+
+## Шаг 3. Никому не показывать API key
+
+**Не отправляйте `.env` в GitHub.**
+
+Не вставляйте API key:
+
+-   в README;
+-   в issue;
+-   в скриншоты;
+-   в тесты;
+-   в сообщения об ошибках;
+-   в исходный код.
+
+В репозитории должен находиться только:
+
+``` text
+.env.example
+```
+
+с пустыми значениями.
+
+------------------------------------------------------------------------
+
+# 8. Запуск приложения
+
+После активации `.venv`:
+
+``` powershell
 streamlit run app/ui/streamlit_app.py
 ```
 
-Product-card name/SKU enrichment uses an application-level batch setting:
+Streamlit покажет локальный адрес приложения.
 
-```text
-OZON_PRODUCT_INFO_BATCH_SIZE=1000
+Обычно браузер открывается автоматически.
+
+Если этого не произошло, скопируйте адрес из PowerShell в браузер.
+
+------------------------------------------------------------------------
+
+# 9. Запуск в один клик --- Windows
+
+В проекте предусмотрены launcher-файлы.
+
+Для запуска:
+
+``` text
+START_OZON_MANAGER.vbs
 ```
 
-This value controls local request batching; it is not treated as a new Ozon API limit by the application.
+Можно просто дважды щёлкнуть этот файл.
 
-For development/testing without real Ozon mutation, use the mock adapter through the test suite. The runtime UI does not expose a Mock mode.
+Первый запуск создаёт виртуальное окружение и устанавливает необходимые
+зависимости. Последующие запуски используют готовое окружение.
 
+Для остановки:
 
+``` text
+STOP_OZON_MANAGER.bat
+```
 
-## Tests
+Подробности находятся в:
 
-```bash
-pytest
+``` text
+LAUNCHER_README_RU.md
+```
+
+------------------------------------------------------------------------
+
+# 10. Первый запуск
+
+После запуска:
+
+1.  Проверьте, что открывается интерфейс.
+2.  Проверьте раздел аккаунта.
+3.  Проверьте соединение с Ozon.
+4.  Загрузите акции.
+5.  Выберите нужную акцию.
+6.  Загрузите кандидатов / участников.
+7.  Перед первой реальной mutation внимательно проверьте Preview.
+
+**Не используйте первую mutation как способ проверки того, работает ли
+программа.**
+
+Сначала убедитесь, что:
+
+-   выбран правильный аккаунт;
+-   выбрана правильная акция;
+-   выбран правильный товар;
+-   отображаются правильные идентификаторы;
+-   Preview показывает ожидаемое изменение.
+
+------------------------------------------------------------------------
+
+# 11. Тестовый режим
+
+Для разработки и автоматических тестов предусмотрен Mock adapter.
+
+Он предназначен для проверки бизнес-логики без реальной mutation в Ozon.
+
+Runtime UI не предоставляет произвольный Mock mode для обычной
+эксплуатации.
+
+------------------------------------------------------------------------
+
+# 12. Проверка проекта после установки
+
+В активированном `.venv` выполните:
+
+``` powershell
 python -m compileall -q app tests
 ```
 
-Current local verification for this build: **256 passed, 1 skipped** in the full Python suite. The single skip is the Streamlit smoke test when Streamlit is not installed in the test environment. JavaScript syntax for the custom table component is checked separately with `node --check` on the extracted component script.
+Если команда ничего не вывела и завершилась успешно --- синтаксическая
+проверка пройдена.
 
-Current automated suite covers:
+Затем:
 
-- state machine;
-- action_price validation;
-- Target Boost blocking;
-- Preview/Fresh Check/Snapshot/Confirmation gate;
-- successful mutation + verification;
-- partial rejection;
-- verification mismatch;
-- timeout/unknown result without blind retry;
-- immutable snapshot fields;
-- 1/10/100/1000 bulk planning/preview;
-- snapshot-based rollback;
-- adapter wire contract;
-- security fixture scan.
-
-## Security
-
-Credentials are read from environment variables or Streamlit secrets and are never written to SQLite/history/snapshots/logs. `.env` and local database/log files are ignored by Git.
-
-## Known limitation
-
-Ozon-specific action-price precision/tick/rounding is not invented by this application. The adapter transports decimal amounts as strings; validation beyond positivity is deliberately conservative until a verified Ozon rule is available.
-
-
-## Current safety-audit status
-
-- Real Ozon `action_price` mutation: **LIVE VERIFIED** through `POST /v1/actions/products/activate` on an existing Elastic Boosting participant; restore was also verified.
-- Mutation batching: controlled by `Settings.batch_size` / `OZON_BATCH_SIZE`; this is an application configuration value, not an asserted Ozon API limit.
-- Mutation transport status: taken from the adapter result; no hardcoded HTTP 200 is used.
-- Timeout/network ambiguity: classified as `UNKNOWN_RESULT`; no blind retry is performed.
-- Pre-mutation Fresh Check read failure: persisted as a mutation-blocking error and aborts before any mutation call.
-- 900-SKU mock mutation stress scenario: covered by automated tests; no real Ozon mutation is performed.
-- Auto-Add rollback: confirmed in controlled project verification; six test SKUs reached `CONFIRMED_RESTORED`.
-
-## Current mutation contract
-
-`POST /v1/actions/products/update` is **not used**. The adapter's `update_products()` method intentionally routes existing-participant price UPDATE through the live-verified `POST /v1/actions/products/activate` contract. It accepts `action_id` plus `products[{product_id, action_price, stock?}]` and returns accepted/rejected results. The workflow preserves partial results and performs mandatory read-after-write verification.
-
-Candidate ADD uses the same activate transport with its own Fresh Check and per-product Elastic Boosting price-range validation.
-## Текущий статус релиза — 04.10.2026
-
-- Локальный режим: **single-user**.
-- Полный Python regression suite: **256 passed, 1 skipped**.
-- `python -m compileall -q app tests`: **PASS**.
-- Credentials/runtime secrets are not included in the release archive.
-- Preview, Fresh Check, Snapshot-before-mutation, Confirmation, read-after-write verification, partial-result handling, fail-closed `UNKNOWN_RESULT`, History and snapshot-backed rollback остаются частью текущего safety workflow.
-- Stocks и Auto-Add работают в пределах описанного в документации текущего контракта.
-- **Известный плановый риск:** promotion mutation endpoints `POST /v1/actions/products/activate` и `POST /v1/actions/products/deactivate` подтверждены для текущего релиза, но в актуальном API snapshot имеют shutdown **13.10.2026**. Замена не считается реализованной, пока не подтверждена актуальным контрактом и фактическим поведением Ozon.
-
-## Запуск в один клик (Windows)
-
-Для запуска без PowerShell и ручного ввода команд дважды щёлкните **START_OZON_MANAGER.vbs**.
-Первый запуск создаст `.venv` и установит зависимости; последующие запуски используют готовое окружение.
-Для остановки приложения используйте **STOP_OZON_MANAGER.bat**.
-
-Подробнее: `LAUNCHER_README_RU.md`.
-
-
-## Current UI contract
-
-- Candidates, Participants and Auto-Add use the shared interactive table component.
-- Tables support horizontal scrolling, fixed-height table frames, sticky headers, sorting, right-click header filtering, Shift+LMB / Shift+RMB range selection and header `✓` select-all for selectable tables.
-- Participants UPDATE exposes per-product minimum/maximum Elastic Boosting thresholds and a global percentage control.
-- ADD/UPDATE result screens remain visible after mutation until the user closes them.
-- Long-running operations display a centered modal loading overlay instead of only an inline page status.
-
-## UI verification
-
-The project uses `Streamlit AppTest` for application-level UI/startup verification. A real-browser Playwright E2E layer is intentionally not part of the release or development test stack: the previous browser harness was environment/lifecycle-sensitive and did not provide a reliable release signal.
-
-Run:
-
-```bash
-pytest
+``` powershell
+pytest -q
 ```
 
-This includes the Streamlit AppTest smoke contract and the application/domain/integration/contract/security suites.
+Полный набор тестов проверяет, в частности:
+
+-   domain logic;
+-   state machine;
+-   price validation;
+-   Preview;
+-   Fresh Check;
+-   Snapshot;
+-   Confirmation;
+-   mutation safety;
+-   partial failures;
+-   verification mismatch;
+-   timeout / unknown result;
+-   rollback;
+-   adapter contract;
+-   security;
+-   UI smoke contract;
+-   таблицы;
+-   массовые операции.
+
+------------------------------------------------------------------------
+
+# 13. Что делать, если что-то не работает
+
+## `python` не найден
+
+Проверьте:
+
+``` powershell
+python --version
+```
+
+Если Windows не находит Python --- установите Python и включите
+`Add Python to PATH`.
+
+------------------------------------------------------------------------
+
+## `pip install` завершился ошибкой
+
+Сначала обновите pip:
+
+``` powershell
+python -m pip install --upgrade pip
+```
+
+Затем повторите:
+
+``` powershell
+pip install -r requirements.txt
+```
+
+------------------------------------------------------------------------
+
+## Streamlit не запускается
+
+Проверьте, что `.venv` активирован:
+
+``` powershell
+.venv\Scripts\Activate.ps1
+```
+
+Затем:
+
+``` powershell
+streamlit run app/ui/streamlit_app.py
+```
+
+------------------------------------------------------------------------
+
+## Ozon API возвращает ошибку
+
+Не повторяйте mutation вслепую.
+
+Сначала определите:
+
+-   HTTP status;
+-   текст ошибки;
+-   какой endpoint выполнялся;
+-   какой товар был целью;
+-   был ли mutation уже принят Ozon;
+-   что показывает read-after-write.
+
+Особенно важно это для timeout и network errors.
+
+------------------------------------------------------------------------
+
+# 14. Безопасность
+
+Ozon Manager работает с реальным магазином.
+
+Поэтому:
+
+-   не запускайте неизвестные `.py` файлы из сторонних источников;
+-   не передавайте API credentials третьим лицам;
+-   не коммитьте `.env`;
+-   не вставляйте credentials в исходный код;
+-   не повторяйте mutation после неизвестного результата без
+    reconciliation;
+-   проверяйте Preview перед массовыми изменениями;
+-   проверяйте Fresh Check непосредственно перед mutation.
+
+------------------------------------------------------------------------
+
+# 15. Важное различие идентификаторов
+
+В проекте используются разные идентификаторы Ozon.
+
+Не следует автоматически считать одинаковыми:
+
+``` text
+offer_id
+product_id
+sku
+```
+
+Это разные сущности.
+
+Перед mutation приложение должно работать с тем идентификатором, который
+предусмотрен конкретным API contract.
+
+------------------------------------------------------------------------
+
+# 16. Архитектура проекта
+
+Основные уровни:
+
+``` text
+app/
+├── adapters/
+│   ├── mock.py
+│   ├── ozon.py
+│   └── ozon_sdk.py
+│
+├── domain/
+│   ├── models.py
+│   ├── state_machine.py
+│   └── validation.py
+│
+├── infrastructure/
+│   └── logging.py
+│
+├── repositories/
+│   └── sqlite.py
+│
+├── services/
+│   ├── auto_add.py
+│   ├── batching.py
+│   ├── interfaces.py
+│   ├── membership.py
+│   ├── price_engine.py
+│   ├── read_cache.py
+│   ├── rollback.py
+│   ├── stocks.py
+│   └── workflow.py
+│
+└── ui/
+    ├── display.py
+    ├── loading.py
+    ├── package_editor.py
+    ├── stocks.py
+    └── streamlit_app.py
+```
+
+Документация проекта находится в:
+
+``` text
+docs/
+```
+
+Особенно важны:
+
+``` text
+docs/API_SPEC.md
+docs/API_RECONCILIATION.md
+docs/ARCHITECTURE.md
+docs/REQUIREMENTS.md
+docs/TEST_PLAN.md
+docs/OZON_SELLER_DESIGN_SYSTEM.md
+docs/RELEASE_AUDIT.md
+```
+
+------------------------------------------------------------------------
+
+# 17. API и актуальность контракта
+
+Приложение не должно придумывать Ozon API.
+
+Перед изменением API adapter необходимо проверить:
+
+1.  актуальный OpenAPI;
+2.  HTTP method;
+3.  endpoint;
+4.  request schema;
+5.  response schema;
+6.  обязательные поля;
+7.  права доступа;
+8.  ограничения;
+9.  deprecated / shutdown status;
+10. фактическое поведение live API.
+
+Текущий релиз содержит известный плановый риск по promotion mutation
+transport.
+
+**Плановая дата обновления программы: 14.10.2026.**
+
+------------------------------------------------------------------------
+
+# 18. Текущие ограничения
+
+Сейчас приложение не является универсальной панелью управления всеми
+функциями Ozon.
+
+В частности, не следует считать реализованными:
+
+-   все Seller API методы;
+-   все операции с товарами;
+-   все операции с ценами;
+-   все рекламные операции;
+-   Target Boost;
+-   произвольные Seller Actions;
+-   неподтверждённые mutation endpoints.
+
+Если функции нет в текущем UI, service layer и подтверждённом API
+contract --- она не считается реализованной.
+
+------------------------------------------------------------------------
+
+# 19. FAQ
+
+## Можно ли использовать приложение с реальным магазином?
+
+Да. Текущий проект рассчитан на работу с реальным Ozon Seller API.
+
+Именно поэтому mutation защищены Preview, Fresh Check, Snapshot,
+подтверждением и read-after-write verification.
+
+------------------------------------------------------------------------
+
+## Это sandbox?
+
+Нет.
+
+Операции Seller API могут изменить реальные данные магазина.
+
+------------------------------------------------------------------------
+
+## Где хранить Client ID и API Key?
+
+Локально в `.env` или предусмотренном проектом механизме secrets.
+
+Не в Git.
+
+------------------------------------------------------------------------
+
+## Нужно ли каждый раз создавать `.venv`?
+
+Нет.
+
+Обычно виртуальное окружение создаётся один раз для конкретной копии
+проекта.
+
+При последующих запусках его достаточно активировать.
+
+------------------------------------------------------------------------
+
+## Можно ли запускать приложение двойным кликом?
+
+Да.
+
+Используйте:
+
+``` text
+START_OZON_MANAGER.vbs
+```
+
+Для остановки:
+
+``` text
+STOP_OZON_MANAGER.bat
+```
+
+------------------------------------------------------------------------
+
+## Можно ли сначала проверить приложение без изменения Ozon?
+
+Да.
+
+Используйте автоматические тесты и Mock adapter.
+
+Перед реальной mutation сначала проверяйте Preview.
+
+------------------------------------------------------------------------
+
+## Что делать после timeout во время mutation?
+
+Не нажимать повторно вслепую.
+
+Результат может быть неизвестным.
+
+Сначала необходимо выполнить reconciliation / read-after-write проверку.
+
+------------------------------------------------------------------------
+
+## Что такое Preview?
+
+Preview показывает, какое изменение приложение собирается выполнить, до
+отправки mutation в Ozon.
+
+------------------------------------------------------------------------
+
+## Что такое Fresh Check?
+
+Это повторное чтение актуального состояния непосредственно перед
+mutation.
+
+Если состояние изменилось после Preview, старый расчёт нельзя
+автоматически применять.
+
+------------------------------------------------------------------------
+
+## Зачем Snapshot?
+
+Snapshot сохраняет исходные данные перед изменением, если для операции
+предусмотрено восстановление.
+
+Он нужен для контролируемого rollback.
+
+------------------------------------------------------------------------
+
+## Можно ли изменить базовую цену товара?
+
+В текущем рабочем контуре --- нет.
+
+Elastic Boosting работает с `action_price`; базовая цена товара не
+является целью этой mutation.
+
+------------------------------------------------------------------------
+
+## Можно ли применить один процент ко всем товарам?
+
+Да, если каждый выбранный товар проходит собственный допустимый
+диапазон.
+
+Если хотя бы один товар не проходит проверку --- пакет не применяется.
+
+------------------------------------------------------------------------
+
+## Почему приложение не делает автоматический retry mutation?
+
+Потому что после timeout/network error невозможно безопасно
+предположить, что Ozon не принял запрос.
+
+Blind retry может привести к повторной операции.
+
+------------------------------------------------------------------------
+
+## Почему часть функций специально отсутствует?
+
+Потому что проект следует принципу:
+
+**лучше не выполнить неподтверждённую mutation, чем изменить реальный
+магазин неправильным API-вызовом.**
+
+------------------------------------------------------------------------
+
+## Что делать 14.10.2026?
+
+Провести плановое обновление promotion mutation transport после
+подтверждения нового Ozon API contract.
+
+Порядок:
+
+``` text
+API forensic verification
+→ contract update
+→ adapter update
+→ contract tests
+→ live verification
+→ full QA
+→ documentation update
+→ release
+```
+
+------------------------------------------------------------------------
+
+## Где смотреть техническую документацию?
+
+Начните с:
+
+``` text
+docs/ARCHITECTURE.md
+docs/API_SPEC.md
+docs/API_RECONCILIATION.md
+docs/TEST_PLAN.md
+docs/RELEASE_AUDIT.md
+docs/OZON_SELLER_DESIGN_SYSTEM.md
+```
+
+------------------------------------------------------------------------
+
+## ✨ Визуальная часть README
+
+README использует только лёгкие GitHub-совместимые элементы: эмодзи, логотип проекта, badges и HTML-разметку для аккуратного визуального оформления.
+
+Сложная JavaScript-анимация намеренно не используется: GitHub обычно ограничивает активный JavaScript в README. Поэтому визуальные элементы остаются безопасными и не мешают чтению документации.
+
+---
+
+# 20. Финальная проверка установки
+
+После установки рекомендуется выполнить:
+
+``` powershell
+python --version
+```
+
+``` powershell
+python -m compileall -q app tests
+```
+
+``` powershell
+pytest -q
+```
+
+Затем запустить:
+
+``` powershell
+streamlit run app/ui/streamlit_app.py
+```
+
+Если все три проверки проходят, приложение запускается и credentials
+настроены корректно --- локальная установка готова к работе.
+
+------------------------------------------------------------------------
+
+## Статус релиза
+
+**Дата релиза:** 04.10.2026
+
+**Режим:** local / single-user
+
+**Основной стек:** Python + Streamlit + SQLite + Ozon Seller API
+
+**Плановое обновление:** 14.10.2026
+
+Главный принцип проекта:
+
+> **Не предполагать --- проверять. Не обещать --- доказывать тестом или
+> источником.**
