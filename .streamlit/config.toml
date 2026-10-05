@@ -1,0 +1,62 @@
+[theme]
+font = "sans-serif"
+showWidgetBorder = true
+showSidebarBorder = true
+baseRadius = "medium"
+buttonRadius = "small"
+
+# Explicit light mode — Ozon Seller-inspired.
+[theme.light]
+primaryColor = "#005BFF"
+backgroundColor = "#F8FAFD"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#070707"
+linkColor = "#005BFF"
+codeTextColor = "#172133"
+codeBackgroundColor = "#F5F7FA"
+borderColor = "#DCE4EC"
+dataframeBorderColor = "#DCE4EC"
+dataframeHeaderBackgroundColor = "#F3F6F9"
+redColor = "#D90B63"
+orangeColor = "#D97706"
+yellowColor = "#B77900"
+greenColor = "#008A3D"
+blueColor = "#005BFF"
+
+# Explicit dark mode — project adaptation of the same semantic hierarchy.
+# Surfaces are deliberately separated so controls, cards and dialogs do not
+# collapse into one unreadable near-black plane.
+[theme.dark]
+primaryColor = "#276EF1"
+backgroundColor = "#0B121A"
+secondaryBackgroundColor = "#141E29"
+textColor = "#F3F6FA"
+linkColor = "#72A7FF"
+codeTextColor = "#E7EEF7"
+codeBackgroundColor = "#101923"
+borderColor = "#304152"
+dataframeBorderColor = "#304152"
+dataframeHeaderBackgroundColor = "#192634"
+redColor = "#FF5E93"
+orangeColor = "#FFAA45"
+yellowColor = "#FFD15C"
+greenColor = "#46D17D"
+blueColor = "#72A7FF"
+
+[theme.light.sidebar]
+primaryColor = "#005BFF"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F5F7FA"
+textColor = "#070707"
+linkColor = "#005BFF"
+codeBackgroundColor = "#F5F7FA"
+borderColor = "#DCE4EC"
+
+[theme.dark.sidebar]
+primaryColor = "#276EF1"
+backgroundColor = "#0F1822"
+secondaryBackgroundColor = "#182431"
+textColor = "#F3F6FA"
+linkColor = "#8AB7FF"
+codeBackgroundColor = "#101923"
+borderColor = "#304152"
